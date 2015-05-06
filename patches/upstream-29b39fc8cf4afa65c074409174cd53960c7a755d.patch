@@ -1,0 +1,20 @@
+From: David Robillard <d@drobilla.net>
+Date: Sat, 2 Feb 2013 23:17:36 +0000 (-0500)
+Subject: Mark enum ports as lv2:enumeration so hosts display selectors.
+X-Git-Url: http://repo.or.cz/w/calf.git/commitdiff_plain/29b39fc8cf4afa65c074409174cd53960c7a755d
+
+Mark enum ports as lv2:enumeration so hosts display selectors.
+---
+
+diff --git a/src/makerdf.cpp b/src/makerdf.cpp
+index d1a27bb..4ac9281 100644
+--- a/src/makerdf.cpp
++++ b/src/makerdf.cpp
+@@ -145,6 +145,7 @@ static bool add_ctl_port(string &ports, const parameter_properties &pp, int pidx
+     else if (type == PF_ENUM)
+     {
+         ss << ind << "lv2:portProperty lv2:integer ;\n";
++        ss << ind << "lv2:portProperty lv2:enumeration ;\n";
+         for (int i = (int)pp.min; i <= (int)pp.max; i++)
+             ss << ind << "lv2:scalePoint [ rdfs:label \"" << pp.choices[i - (int)pp.min] << "\"; rdf:value " << i <<" ] ;\n";
+     }

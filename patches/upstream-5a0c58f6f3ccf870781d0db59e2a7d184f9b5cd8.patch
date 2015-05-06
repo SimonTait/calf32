@@ -1,0 +1,117 @@
+From: Nedko Arnaudov <nedko@arnaudov.name>
+Date: Thu, 27 Dec 2012 10:50:02 +0000 (+0000)
+Subject: jackhost: clean exit on SIGTERM and SIGHUP
+X-Git-Url: http://repo.or.cz/w/calf.git/commitdiff_plain/5a0c58f6f3ccf870781d0db59e2a7d184f9b5cd8
+
+jackhost: clean exit on SIGTERM and SIGHUP
+
+This commit fixes jack xruns on quit from ladish but
+these signals are not specific to ladish.
+---
+
+diff --git a/src/calf/host_session.h b/src/calf/host_session.h
+index a92a166..9f9ab37 100644
+--- a/src/calf/host_session.h
++++ b/src/calf/host_session.h
+@@ -56,6 +56,8 @@ public:
+     session_manager_iface *session_manager;
+     /// Save has been requested from SIGUSR1 handler
+     volatile bool save_file_on_next_idle_call;
++    /// If non-zero, quit has been requested through signal with same value
++    volatile int quit_on_next_idle_call;
+     /// File name of the current rack
+     std::string current_filename;
+     
+@@ -80,11 +82,11 @@ public:
+     void remove_all_plugins();
+     std::string get_next_instance_name(const std::string &effect_name);
+     
+-    /// Set handler for SIGUSR1 that LADISH uses to invoke Save function
+-    void set_ladish_handler();
++    /// Set handlers for SIGUSR1 (that LADISH uses to invoke Save function), SIGTERM and SIGHUP
++    void set_signal_handlers();
+     
+-    /// SIGUSR1 handler
+-    static void sigusr1handler(int signum);
++    /// unix signal handler
++    static void signal_handler(int signum);
+     
+     /// Client name for window title bar
+     std::string get_client_name() const;
+diff --git a/src/host_session.cpp b/src/host_session.cpp
+index d7c941a..fc472b0 100644
+--- a/src/host_session.cpp
++++ b/src/host_session.cpp
+@@ -43,6 +43,7 @@ host_session::host_session(session_environment_iface *se)
+     session_manager = NULL;
+     only_load_if_exists = false;
+     save_file_on_next_idle_call = false;
++    quit_on_next_idle_call = 0;
+ 
+     main_win = session_env->create_main_window();
+     main_win->set_owner(this);
+@@ -438,9 +439,18 @@ void host_session::save(session_save_iface *stream)
+     }
+ }
+ 
+-void host_session::sigusr1handler(int signum)
++void host_session::signal_handler(int signum)
+ {
+-    instance->save_file_on_next_idle_call = true;
++    switch (signum)
++    {
++    case SIGUSR1:
++        instance->save_file_on_next_idle_call = true;
++        break;
++    case SIGTERM:
++    case SIGHUP:
++        instance->quit_on_next_idle_call = signum;
++        break;
++    }
+ }
+ 
+ void host_session::on_idle()
+@@ -451,17 +461,26 @@ void host_session::on_idle()
+         main_win->save_file();
+         printf("LADISH Level 1 support: file '%s' saved\n", get_current_filename().c_str());
+     }
++
++    if (quit_on_next_idle_call > 0)
++    {
++        printf("Quit requested through signal %d\n", quit_on_next_idle_call);
++        quit_on_next_idle_call = -quit_on_next_idle_call; // mark the event as handled but preserve signal number
++        session_env->quit_gui_loop();
++    }
+ }
+ 
+-void host_session::set_ladish_handler()
++void host_session::set_signal_handlers()
+ {
+     instance = this;
+-    
++
+     struct sigaction sa;
+-    sa.sa_handler = sigusr1handler;
++    sa.sa_handler = signal_handler;
+     sigemptyset(&sa.sa_mask);
+     sa.sa_flags = SA_RESTART;
+-    sigaction(SIGUSR1, &sa, NULL);    
++    sigaction(SIGTERM, &sa, NULL);
++    sigaction(SIGHUP,  &sa, NULL);
++    sigaction(SIGUSR1, &sa, NULL);
+ }
+ 
+ void host_session::reorder_plugins()
+diff --git a/src/jackhost.cpp b/src/jackhost.cpp
+index 0ad4bdd..1983154 100644
+--- a/src/jackhost.cpp
++++ b/src/jackhost.cpp
+@@ -413,7 +413,7 @@ int main(int argc, char *argv[])
+         sess.open();
+         sess.connect();
+         sess.client.activate();
+-        sess.set_ladish_handler();
++        sess.set_signal_handlers();
+         sess.session_env->start_gui_loop();
+         sess.close();
+     }
